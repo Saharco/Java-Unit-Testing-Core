@@ -4,24 +4,41 @@ import OOP.Provided.OOPResult;
 
 public class OOPResultImpl implements OOPResult {
 
+    private OOPTestResult result;
+    private String message;
+
+    OOPResultImpl(OOPTestResult result, String message) {
+        this.result = result;
+        this.message = message;
+    }
+
     @Override
     public OOPTestResult getResultType() {
-        OOPTestResult result = null; //TODO: init this
         return result;
     }
 
     @Override
     public String getMessage() {
-        return null;
+        return message;
     }
 
     @Override
     public boolean equals(Object obj) {
-        return false; //TODO: FIX
+        if(obj == null) {
+            return false;
+        }
+        if(!(obj instanceof OOPResultImpl)) {
+            return false;
+        }
+        OOPResultImpl compareTo = (OOPResultImpl) obj;
+        if(compareTo.message.equals(message) && compareTo.result.equals(result)) {
+            return true;
+        }
+        return false;
     }
 
     @Override
     public int hashCode() {
-        return 0; //TODO: FIX
+       return message.hashCode() * 4 + result.ordinal(); //TODO: check if this is OK
     }
 }

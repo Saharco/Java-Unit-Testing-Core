@@ -2,29 +2,41 @@ package OOP.Solution;
 
 import OOP.Provided.OOPResult;
 
+import java.util.HashMap;
 import java.util.Map;
 
 public class OOPTestSummary {
 
     Map<String, OOPResult> testMap;
 
+    private int countResults(OOPResult.OOPTestResult result) {
+        int count = 0;
+        for(OOPResult testResult : testMap.values()) {
+            if(testResult.getResultType() == result) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     OOPTestSummary (Map<String, OOPResult> testMap) {
         this.testMap = testMap;
     }
 
-    int getNumSuccesses() {
+    public int getNumSuccesses() {
+        return countResults(OOPResult.OOPTestResult.SUCCESS);
+    }
+
+    public int getNumFailures() {
+        return countResults(OOPResult.OOPTestResult.FAILURE);
 
     }
 
-    int getNumFailures() {
-
+    public int getNumExceptionMismatches() {
+        return countResults(OOPResult.OOPTestResult.EXPECTED_EXCEPTION_MISMATCH);
     }
 
-    int getNumExceptionMismatches() {
-
-    }
-
-    int getNumErrors() {
-
+    public int getNumErrors() {
+        return countResults(OOPResult.OOPTestResult.ERROR);
     }
 }

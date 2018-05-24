@@ -9,8 +9,8 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
 
     //Attribute: the expected exception class
     private Class<? extends Exception> expected;
-    //Attribute: list of substrings to expect in the exception's message
-    private List<String> messages;
+    //Attribute: message string that we expect in the exception's message
+    private String message;
 
     @Override
     public Class<? extends Exception> getExpectedException() {
@@ -25,7 +25,7 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
 
     @Override
     public OOPExpectedException expectMessage(String msg) {
-        this.messages.add(msg);
+        message = msg;
         return this;
     }
 
@@ -38,21 +38,18 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
         }
 
         String exceptionMessage = e.getMessage();
-        for(String message : messages) {
-            if(!exceptionMessage.contains(message)) {
-                //e does not contain all of the expected sub-messages
+            if(message == null || !message.contains(exceptionMessage)) {
+                //the message does not contain the given sub-message
                 return false;
             }
-        }
-
         return true;
-    }
+        }
 
     public static OOPExpectedExceptionImpl none () {
         //Create a new expected exception, where the expected exception is null
         OOPExpectedExceptionImpl res = new OOPExpectedExceptionImpl();
         res.expected = null;
-        res.messages = new LinkedList<>();
+        res.message = null;
         return res;
     }
 }
