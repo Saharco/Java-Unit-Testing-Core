@@ -13,9 +13,6 @@ public class OOPUnitCore {
     //Attribute: the default tag for tests that are not tagged
     private final static String defaultTag = "";
 
-//    A backup of the given class object, which will be used in case there's a test failure
-//    private static Object backupObject;
-
     public static void assertEquals(Object expected, Object actual) throws OOPAssertionFailure {
         if((expected == null && actual != null) || ((expected != null) && !(expected.equals(actual)))) {
             throw new OOPAssertionFailure();
@@ -43,7 +40,7 @@ public class OOPUnitCore {
 
         //The methods map, which maps a list of OOP annotated methods to each annotation type
         Map<Class <? extends Annotation>, List<Method>> annotatedMethods =
-                fillOOPMethods(testClass);
+                fillOOPMethods(testClass, tag);
 
         //A copy of the given class object: initialized with the given class's 0-args constructor
         Object copyObject = initCopy(testClass);
@@ -58,38 +55,95 @@ public class OOPUnitCore {
          */
         callSetupMethods(annotatedMethods, copyObject);
 
-        callTestMethods(annotatedMethods, copyObject, OOPTestsResults);
+        callTestMethods(annotatedMethods, (Class<?>)copyObject, OOPTestsResults);
 
         return new OOPTestSummary(OOPTestsResults);
     }
 
     private static void callTestMethods(Map<Class<? extends Annotation>, List<Method>>
-                                        annotatedMethods, Object copyObject,
+                                        annotatedMethods, Class<?> copyObject,
                                         Map<String,OOPResult> OOPTestsResults) {
         try {
-            Object backupObject = backup((Class<?>)copyObject);
+            for(Method test : annotatedMethods.get(OOPTest.class)) {
+                if(!safeCallBeforeAfter(annotatedMethods, copyObject, OOPBefore.class,
+                        OOPTestsResults, test, true)) {
+                    //The test has failed: couldn't run before methods. Continue to the next test
+                    continue;
+                }
+                //Run Tests
+                if(!safeCallBeforeAfter(annotatedMethods, copyObject, OOPAfter.class,
+                        OOPTestsResults, test, false)) {
+                    //The test has failed: couldn't run after methods. Continue to the next test
+                    continue; //TODO: continue from here
+                }
+            }
 
          } catch (Exception e) {
              //We shouldn't get here
          }
     }
 
-    private static Object backup(Class<?> copyObject) {
+    private static boolean safeCallBeforeAfter(Map<Class<? extends Annotation>, List<Method>>
+                                        annotatedMethods, Class<?> copyObject,
+                                        Class<? extends Annotation> annotation,
+                                        Map<String, OOPResult> OOPTestsResults,
+                                        Method test, boolean isOrdered) {
         Object backupObject = null;
         try {
-            backupObject = initCopy(copyObject);
-            Class<?> current = (Class<?>)copyObject;
-            while(current.getSuperclass() != null) {
-                for (Field field : copyObject.getClass().getDeclaredFields()) {
-                    field.setAccessible(true);
-                    field.set(backupObject, fieldBackup(field.get(copyObject)));
+            Method[] methods = new Method[annotatedMethods.get(annotation).size()];
+            methods = annotatedMethods.get(annotation).toArray(methods);
+            if(!isOrdered) {
+                reverseArray(methods);
+            }
+            Class<?> testClass = test.getDeclaringClass();
+            List<Method> suitableMethods = Arrays.stream(methods)
+                    .filter(m -> m.getDeclaringClass().isAssignableFrom(testClass)) //TODO: Check if this is OK
+                    .collect(Collectors.toList());
+            for(Method m : suitableMethods) {
+                try {
+                    backupObject = backup(copyObject);
+                    m.invoke(copyObject);
+                } catch (Exception e) {
+                    //OOPBefore / OOPAfter method threw an exception: restore the object
+                    OOPResult testResult = new OOPResultImpl(OOPResult.OOPTestResult.ERROR,
+                            e.getClass().getName());
+                    OOPTestsResults.put(test.getName(), testResult);
+                    copyObjectFields(copyObject, backupObject);
+                    return false;
                 }
-                current = current.getSuperclass();
             }
         } catch (Exception e) {
             //We shouldn't get here
         }
+        return true;
+    }
+
+    private static<T> void reverseArray(T[] arr) {
+        List<T> orderList = Arrays.asList(arr);
+        Collections.reverse(orderList);
+        orderList.toArray(arr);
+    }
+
+    private static Object backup(Class<?> copyObject) {
+        Object backupObject = null;
+        try {
+            backupObject = initCopy(copyObject);
+            copyObjectFields(backupObject, copyObject);
+        } catch (Exception e) {
+            //We shouldn't get here
+        }
         return backupObject;
+    }
+
+    private static void copyObjectFields(Object target, Object source) {
+        try {
+            for (Field field : source.getClass().getDeclaredFields()) {
+                field.setAccessible(true);
+                field.set(target, fieldBackup(field.get(source)));
+            }
+        } catch (Exception e) {
+            //We shouldn't get here
+        }
     }
 
     private static Object fieldBackup(Object field) {
@@ -167,7 +221,6 @@ public class OOPUnitCore {
 
     private static Object initCopy(Class<?> testClass) {
         try {
-            //Step A: copy the given class
             Class<?> c = Class.forName(testClass.getName());
             Constructor ctor = c.getDeclaredConstructor(); //We expect a 0-arguments constructor
             ctor.setAccessible(true); //Constructor might not be accessible
@@ -220,7 +273,8 @@ public class OOPUnitCore {
         return allOOPMethods;
     }
 
-    private static Map<Class<? extends Annotation>,List<Method>> fillOOPMethods(Class<?> c) {
+    private static Map<Class<? extends Annotation>,List<Method>> fillOOPMethods(Class<?> c,
+                                                                                String tag) {
         Map<Class<? extends Annotation>,List<Method>> methodsDict = new HashMap<>();
         //Initialize an empty list of methods for each possible method annotation:
         methodsDict.put(OOPSetup.class, new LinkedList<>());
@@ -235,6 +289,9 @@ public class OOPUnitCore {
             // Add all the OOPUnit annotated methods in the class's hierarchy to the dictionary
             methodsDict.get(info.getAnnotation().annotationType()).add(info.method);
         }
+        //Sort all of the OOPTest annotated methods according to the user's given order
+        methodsDict.put(OOPTest.class,
+                sortOOPTests(methodsDict.get(OOPTest.class), c, tag));
         return methodsDict;
     }
 

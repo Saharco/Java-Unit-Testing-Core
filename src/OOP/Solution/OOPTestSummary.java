@@ -7,7 +7,7 @@ import java.util.Map;
 
 public class OOPTestSummary {
 
-    Map<String, OOPResult> testMap;
+    private Map<String, OOPResult> testMap;
 
     private int countResults(OOPResult.OOPTestResult result) {
         int count = 0;

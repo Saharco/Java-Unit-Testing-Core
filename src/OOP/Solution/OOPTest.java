@@ -8,6 +8,6 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)
 public @interface OOPTest {
-    int order();
+    int order() default 0;
     String tag() default "";
 }
