@@ -1,6 +1,7 @@
 package OOP.Solution;
 
 import OOP.Provided.OOPAssertionFailure;
+import OOP.Provided.OOPExpectedException;
 import OOP.Provided.OOPResult;
 
 import java.lang.annotation.Annotation;
@@ -14,7 +15,8 @@ public class OOPUnitCore {
     private final static String defaultTag = "";
 
     public static void assertEquals(Object expected, Object actual) throws OOPAssertionFailure {
-        if((expected == null && actual != null) || ((expected != null) && !(expected.equals(actual)))) {
+        if((expected == null && actual != null) ||
+                ((expected != null) && !(expected.equals(actual)))) {
             throw new OOPAssertionFailure();
         }
     }
@@ -40,7 +42,10 @@ public class OOPUnitCore {
 
         //The methods map, which maps a list of OOP annotated methods to each annotation type
         Map<Class <? extends Annotation>, List<Method>> annotatedMethods =
-                fillOOPMethods(testClass, tag);
+                getOOPMethods(testClass, tag);
+
+        //The rules list
+        List<Field> classExceptionRules = getOOPExceptionRules(testClass);
 
         //A copy of the given class object: initialized with the given class's 0-args constructor
         Object copyObject = initCopy(testClass);
@@ -49,73 +54,135 @@ public class OOPUnitCore {
         annotatedMethods.put(OOPTest.class,
                 sortOOPTests(annotatedMethods.get(OOPTest.class), testClass, tag));
 
-        /*
-         * Run all of the OOPSetup annotated methods, starting with the top of the hierarchy
-         * tree, excluding overridden methods
-         */
+        //Run all of the OOPSetup annotated methods, excluding overridden methods
         callSetupMethods(annotatedMethods, copyObject);
 
-        callTestMethods(annotatedMethods, (Class<?>)copyObject, OOPTestsResults);
+        callTestMethods(annotatedMethods, classExceptionRules, (Class<?>)copyObject,
+                OOPTestsResults);
 
         return new OOPTestSummary(OOPTestsResults);
     }
 
-    private static void callTestMethods(Map<Class<? extends Annotation>, List<Method>>
-                                        annotatedMethods, Class<?> copyObject,
-                                        Map<String,OOPResult> OOPTestsResults) {
-        try {
-            for(Method test : annotatedMethods.get(OOPTest.class)) {
-                if(!safeCallBeforeAfter(annotatedMethods, copyObject, OOPBefore.class,
-                        OOPTestsResults, test, true)) {
-                    //The test has failed: couldn't run before methods. Continue to the next test
-                    continue;
-                }
-                //Run Tests
-                if(!safeCallBeforeAfter(annotatedMethods, copyObject, OOPAfter.class,
-                        OOPTestsResults, test, false)) {
-                    //The test has failed: couldn't run after methods. Continue to the next test
-                    continue; //TODO: continue from here
+    private static List<Field> getOOPExceptionRules(Class<?> testClass) {
+        List<Field> fields = new LinkedList<>();
+        Class<?> current = testClass;
+        while(current.getSuperclass() != null) {
+            for(Field field : current.getDeclaredFields()) {
+                if(field.getAnnotation(OOPExceptionRule.class) != null) {
+                    field.setAccessible(true);
+                    fields.add(field);
                 }
             }
-
-         } catch (Exception e) {
-             //We shouldn't get here
-         }
+            current = current.getSuperclass();
+        }
+        return fields;
     }
 
-    private static boolean safeCallBeforeAfter(Map<Class<? extends Annotation>, List<Method>>
-                                        annotatedMethods, Class<?> copyObject,
-                                        Class<? extends Annotation> annotation,
-                                        Map<String, OOPResult> OOPTestsResults,
-                                        Method test, boolean isOrdered) {
-        Object backupObject = null;
-        try {
-            Method[] methods = new Method[annotatedMethods.get(annotation).size()];
-            methods = annotatedMethods.get(annotation).toArray(methods);
-            if(!isOrdered) {
-                reverseArray(methods);
+    private static void callTestMethods(Map<Class<? extends Annotation>, List<Method>>
+                                      annotatedMethods, List<Field> classExceptionRules,
+                                      Class<?> copyObject, Map<String,OOPResult> OOPTestsResults) {
+        Object backupObject = backup(copyObject);
+        for(Method test : annotatedMethods.get(OOPTest.class)) {
+            //Run OOPBefore methods:
+            try {
+                shouldAbortCallBeforeAfter(annotatedMethods, copyObject, OOPBefore.class, test);
+            } catch (Exception e) {
+               /*
+                * The test has failed: couldn't run OOPBefore methods.
+                * Mark the test's failure, restore the object, and continue to the next test
+                */
+                OOPTestsResults.put(test.getName(), new
+                        OOPResultImpl(OOPResult.OOPTestResult.ERROR, e.getMessage()));
+                copyObjectFields(copyObject, backupObject);
+                continue;
             }
-            Class<?> testClass = test.getDeclaringClass();
-            List<Method> suitableMethods = Arrays.stream(methods)
-                    .filter(m -> m.getDeclaringClass().isAssignableFrom(testClass)) //TODO: Check if this is OK
-                    .collect(Collectors.toList());
-            for(Method m : suitableMethods) {
-                try {
-                    backupObject = backup(copyObject);
-                    m.invoke(copyObject);
-                } catch (Exception e) {
-                    //OOPBefore / OOPAfter method threw an exception: restore the object
-                    OOPResult testResult = new OOPResultImpl(OOPResult.OOPTestResult.ERROR,
-                            e.getClass().getName());
-                    OOPTestsResults.put(test.getName(), testResult);
+            //Run Tests:
+            try {
+                test.invoke(copyObject);
+                //The test succeeded. We mark this as a success, but will override in case of failure in OOPAfter methods
+                OOPTestsResults.put(test.getName(), new OOPResultImpl(
+                        OOPResult.OOPTestResult.SUCCESS, null));
+            } catch(OOPAssertionFailure e) {
+                OOPResult testResult = new OOPResultImpl(OOPResult.OOPTestResult.FAILURE,
+                        e.getMessage());
+                OOPTestsResults.put(test.getName(), testResult);
+                copyObjectFields(copyObject, backupObject);
+            } catch(Exception e) {
+                if(classExceptionRules.contains(OOPExpectedExceptionImpl.none())) {
+                    //Unexpected exception occurred: Error!
+                    OOPTestsResults.put(test.getName(), new
+                            OOPResultImpl(OOPResult.OOPTestResult.ERROR, e.getMessage()));
                     copyObjectFields(copyObject, backupObject);
-                    return false;
+                } else if(expectedException(classExceptionRules, e, copyObject)) {
+                    //Expected exception: Success!
+                    OOPTestsResults.put(test.getName(), new OOPResultImpl(
+                            OOPResult.OOPTestResult.SUCCESS, null));
+                }
+                else {
+                    //Expected exception mismatch!
+                    OOPTestsResults.put(test.getName(),new
+                            OOPResultImpl(OOPResult.OOPTestResult.EXPECTED_EXCEPTION_MISMATCH,
+                            e.getMessage()));
+                    copyObjectFields(copyObject, backupObject);
                 }
             }
-        } catch (Exception e) {
+
+            //Run OOPAfter methods:
+            try {
+                shouldAbortCallBeforeAfter(annotatedMethods, copyObject, OOPAfter.class, test);
+            } catch (Exception e) {
+                /*
+                 * The test has failed: couldn't run OOPAfter methods.
+                 * Mark the test's failure, restore the object, and continue to the next test
+                 */
+                OOPTestsResults.put(test.getName(), new OOPResultImpl(OOPResult.OOPTestResult.ERROR,
+                        e.getClass().getName())); //This will override the result
+                copyObjectFields(copyObject, backupObject);
+            }
+        }
+    }
+
+    private static boolean expectedException(List<Field> classExceptionRules, Exception exception,
+                                             Class<?> copyObject) {
+        try {
+            for(Field rule : classExceptionRules) {
+                if(((OOPExpectedException)rule.get(copyObject)).assertExpected(exception)) {
+                    return true;
+                }
+            }
+        } catch(Exception e) {
             //We shouldn't get here
         }
-        return true;
+        return false;
+    }
+
+    private static void shouldAbortCallBeforeAfter(Map<Class<? extends Annotation>, List<Method>>
+                                        annotatedMethods, Class<?> copyObject,
+                                        Class<? extends Annotation> annotation,
+                                        Method test) throws Exception {
+        Method[] methods = new Method[annotatedMethods.get(annotation).size()];
+        methods = annotatedMethods.get(annotation).toArray(methods);
+        if(annotation.getName().equals("OOPAfter")) {
+            reverseArray(methods);
+        }
+        Class<?> testClass = test.getDeclaringClass();
+        List<Method> suitableMethods = Arrays.stream(methods)
+                .filter(m -> (containsTest(m, annotation, test)) &&
+                        (m.getDeclaringClass().isAssignableFrom(testClass))) //TODO: Check if this is OK
+                .collect(Collectors.toList());
+        for(Method m : suitableMethods) {
+//            backupObject = backup(copyObject);
+            m.invoke(copyObject);
+        }
+    }
+
+    private static boolean containsTest(Method m, Class<? extends Annotation> annotation,
+                                        Method test) {
+        return (annotation.getName().equals("OOPBefore")) ?
+                Arrays.asList(m.getDeclaredAnnotation(OOPBefore.class).value())
+                        .contains(test.getName()) :
+                Arrays.asList(m.getDeclaredAnnotation(OOPAfter.class).value())
+                        .contains(test.getName());
     }
 
     private static<T> void reverseArray(T[] arr) {
@@ -193,10 +260,10 @@ public class OOPUnitCore {
         return Arrays.stream(OOPTests.toArray(currentTestMethods))
                 .filter(m->m.getDeclaredAnnotation(OOPTest.class).tag().equals(tag) ||
                         (!tag.equals(defaultTag)))
-                .sorted(Comparator.comparingInt(m -> m.getDeclaredAnnotation(OOPTest.class).order()))
+                .sorted(Comparator.comparingInt(m ->
+                        m.getDeclaredAnnotation(OOPTest.class).order()))
                 .collect(Collectors.toList());
     }
-
 
     private static void callSetupMethods(Map<Class <? extends Annotation>, List<Method>>
                                                  annotatedMethods, Object copyObject) {
@@ -273,7 +340,7 @@ public class OOPUnitCore {
         return allOOPMethods;
     }
 
-    private static Map<Class<? extends Annotation>,List<Method>> fillOOPMethods(Class<?> c,
+    private static Map<Class<? extends Annotation>,List<Method>> getOOPMethods(Class<?> c,
                                                                                 String tag) {
         Map<Class<? extends Annotation>,List<Method>> methodsDict = new HashMap<>();
         //Initialize an empty list of methods for each possible method annotation:
