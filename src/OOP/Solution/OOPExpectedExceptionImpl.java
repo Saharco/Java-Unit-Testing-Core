@@ -32,7 +32,8 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
     @Override
     public boolean assertExpected(Exception e) {
         Class<?> clazz = e.getClass();
-        if(!(e.getClass().isAssignableFrom(expected))) {
+        if(!(e.getClass()).isAssignableFrom(expected)) {
+//        if(!(expected.isAssignableFrom(e.getClass()))) { //TODO: Check if this is reversed
             //e is not a subclass of the expected exception
             return false;
         }
