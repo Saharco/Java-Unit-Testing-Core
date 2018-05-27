@@ -9,6 +9,65 @@ import java.lang.reflect.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
+
+/**
+ * The main OOPUnit framework class. Utilizes reflection to run tests in the desired order, and
+ * gathers the results for all the class tests.
+ *
+ * This class also utilizes the following OOPUnit classes:
+ * {@link }
+ *
+ * ************************************************************************************************
+ *
+ * The OOPUnit API:
+ *
+ * {@link #assertEquals(Object, Object)}
+ *  throws an OOPAssertionFailure exception iff two given objects aren't identical
+ * {@link #fail()}
+ *  throws an OOPAssertionFailure
+ * {@link #runClass(Class)}
+ *  runs all the OOPUnit annotated setup methods, before methods, test methods and after methods
+ * {@link #runClass(Class, String)}
+ *  runs the tagged OOPUnit annotated test methods that match with the given tag
+ *
+ *  *************************** Helper functions to support this class: ***************************
+ *
+ *  Information gathering functions:
+ *
+ *  {@link #getOOPUnitAnnotation(Method)}
+ *  {@link #getOOPExceptionRules(Class)}
+ *  {@link #classOOPMethods(Class)}
+ *  {@link #sortOOPTests(List, Class, String)}
+ *  {@link #initCopy(Class)}  //TODO: check if this is OK (probably isnt)
+ *  {@link #expectedException(List, Exception, Object)}
+ *  {@link #containsTest(Method, Class, Method)}
+ *
+ *  ***********************************************************************************************
+ *
+ *  Methods invoking functions:
+ *
+ *  Invokes the OOPSetup methods: {@link #callSetupMethods(Map, Object)}
+ *  Invokes all OOPTest methods: {@link #callTestMethods(Map, List, Object, Map)}
+ *  Invokes a given OOPTest method's OOPBefore or OOPAfter methods:
+ *      {@link #callBeforeAfter(Map, Object, Class, Method)}
+ *
+ *  ***********************************************************************************************
+ *
+ *  Backup related functions:
+ *
+ *  {@link #backup(Object)}
+ *  {@link #fieldBackup(Object)}
+ *  {@link #copyObjectFields(Object, Object)}
+ *
+ *  ***********************************************************************************************
+ *
+ *  Misc functions:
+ *
+ *  {@link #reverseArray(Object[])}
+ *
+ *  ***********************************************************************************************
+ *
+ */
 public class OOPUnitCore {
 
     //Attribute: the default tag for tests that are not tagged
@@ -33,13 +92,14 @@ public class OOPUnitCore {
             throws IllegalArgumentException {
 
         if(testClass == null || testClass.getAnnotationsByType(OOPTestClass.class).length == 0) {
-            //Given class is either not a class, or not a test class
+            //Given class is either not a class, or not an OOPUnit test class
             throw new IllegalArgumentException();
         }
 
         //The result map of all the tests
         Map<String,OOPResult> OOPTestsResults = new HashMap<>();
 
+        //FIXME: Does not add the methods into the dictionary correctly
         //The methods map, which maps a list of OOP annotated methods to each annotation type
         Map<Class <? extends Annotation>, List<Method>> annotatedMethods =
                 getOOPMethods(testClass, tag);
@@ -57,8 +117,18 @@ public class OOPUnitCore {
         //Run all of the OOPSetup annotated methods, excluding overridden methods
         callSetupMethods(annotatedMethods, copyObject);
 
-        callTestMethods(annotatedMethods, classExceptionRules, (Class<?>)copyObject,
-                OOPTestsResults);
+        /*
+         * Run the appropriate test methods in the desired order, and gather the results.
+         * Calls test-appropriate OOPBefore & OOPAfter methods for each of the tests
+         */
+
+        try {
+            callTestMethods(annotatedMethods, classExceptionRules, copyObject,
+                    OOPTestsResults);
+        } catch(Exception e) {
+            //We shouldn't get here
+            fail();
+        }
 
         return new OOPTestSummary(OOPTestsResults);
     }
@@ -78,14 +148,23 @@ public class OOPUnitCore {
         return fields;
     }
 
+    /**
+     * Main framework method: runs all the tests in the test class, and gathers the results
+     * @param annotatedMethods: dictionary that consists of a list of OOPUnit annotated methods,
+     *                        in the order in which they should run, for each of the annotation types.
+     * @param classExceptionRules: list of the class's exception rules
+     * @param copyObject: class on which the tests will be invoked
+     * @param OOPTestsResults: method_name -> OOPResult dictionary that marks the results of all
+     *                       the test methods.
+     */
     private static void callTestMethods(Map<Class<? extends Annotation>, List<Method>>
                                       annotatedMethods, List<Field> classExceptionRules,
-                                      Class<?> copyObject, Map<String,OOPResult> OOPTestsResults) {
+                                      Object copyObject, Map<String,OOPResult> OOPTestsResults) {
         Object backupObject = backup(copyObject);
         for(Method test : annotatedMethods.get(OOPTest.class)) {
             //Run OOPBefore methods:
             try {
-                shouldAbortCallBeforeAfter(annotatedMethods, copyObject, OOPBefore.class, test);
+                callBeforeAfter(annotatedMethods, copyObject, OOPBefore.class, test);
             } catch (Exception e) {
                /*
                 * The test has failed: couldn't run OOPBefore methods.
@@ -126,10 +205,9 @@ public class OOPUnitCore {
                     copyObjectFields(copyObject, backupObject);
                 }
             }
-
             //Run OOPAfter methods:
             try {
-                shouldAbortCallBeforeAfter(annotatedMethods, copyObject, OOPAfter.class, test);
+                callBeforeAfter(annotatedMethods, copyObject, OOPAfter.class, test);
             } catch (Exception e) {
                 /*
                  * The test has failed: couldn't run OOPAfter methods.
@@ -142,8 +220,15 @@ public class OOPUnitCore {
         }
     }
 
+    /**
+     * Checks if a given exception was declared in a given test class's exception rules
+     * @param classExceptionRules: the class's exception rules
+     * @param exception: a candidate exception to be checked
+     * @param copyObject: the test class
+     * @return true iff the given exception is part of the class's exception rules
+     */
     private static boolean expectedException(List<Field> classExceptionRules, Exception exception,
-                                             Class<?> copyObject) {
+                                             Object copyObject) {
         try {
             for(Field rule : classExceptionRules) {
                 if(((OOPExpectedException)rule.get(copyObject)).assertExpected(exception)) {
@@ -152,17 +237,29 @@ public class OOPUnitCore {
             }
         } catch(Exception e) {
             //We shouldn't get here
+            fail();
         }
         return false;
     }
 
-    private static void shouldAbortCallBeforeAfter(Map<Class<? extends Annotation>, List<Method>>
-                                        annotatedMethods, Class<?> copyObject,
+    /**
+     * Runs either OOPBefore or OOPAfter annotated methods, and throws potential exceptions
+     * from running these methods onwards in case they fail
+     * @param annotatedMethods: dictionary of the OOPUnit methods, listed in the desired order
+     * @param copyObject: the test class on which the methods will be invoked
+     * @param annotation: invoked methods' annotation type: either OOPBefore or OOPAfter
+     * @param test: the test methods that is currently being run with this set of OOPBefore and
+     *            OOPAfter methods
+     * @throws Exception: exception that might be thrown from any of the invoked methods
+     */
+    private static void callBeforeAfter(Map<Class<? extends Annotation>, List<Method>>
+                                        annotatedMethods, Object copyObject,
                                         Class<? extends Annotation> annotation,
                                         Method test) throws Exception {
+        assert(annotation == OOPBefore.class || annotation == OOPAfter.class);
         Method[] methods = new Method[annotatedMethods.get(annotation).size()];
         methods = annotatedMethods.get(annotation).toArray(methods);
-        if(annotation.getName().equals("OOPAfter")) {
+        if(annotation == OOPAfter.class) { //TODO: Check if this is OK
             reverseArray(methods);
         }
         Class<?> testClass = test.getDeclaringClass();
@@ -171,37 +268,66 @@ public class OOPUnitCore {
                         (m.getDeclaringClass().isAssignableFrom(testClass))) //TODO: Check if this is OK
                 .collect(Collectors.toList());
         for(Method m : suitableMethods) {
-//            backupObject = backup(copyObject);
+//            backupObject = backup(copyObject); TODO: check if backup is performed here
             m.invoke(copyObject);
         }
     }
 
+    /**
+     * Checks if a given OOPBefore/OOPAfter method should be invoked for a given test method
+     * @param m: the OOPBefore/OOPAfter method that needs to be checked
+     * @param annotation: annotation type: either OOPBefore or OOPAfter
+     * @param test: the test method
+     * @return true iff the method's OOPBefore / OOPAfter annotation contains the given test
+     * method's name
+     */
     private static boolean containsTest(Method m, Class<? extends Annotation> annotation,
                                         Method test) {
-        return (annotation.getName().equals("OOPBefore")) ?
+        assert(annotation == OOPBefore.class || annotation == OOPAfter.class);
+        return (annotation == OOPBefore.class) ?
                 Arrays.asList(m.getDeclaredAnnotation(OOPBefore.class).value())
                         .contains(test.getName()) :
                 Arrays.asList(m.getDeclaredAnnotation(OOPAfter.class).value())
                         .contains(test.getName());
     }
 
+    /**
+     * Generic function that reverses the order in which an array's elements are indexed
+     * @param arr: array to be reversed
+     */
     private static<T> void reverseArray(T[] arr) {
         List<T> orderList = Arrays.asList(arr);
         Collections.reverse(orderList);
         orderList.toArray(arr);
     }
 
-    private static Object backup(Class<?> copyObject) {
+    /**
+     * Backs-up a given class's declared fields
+     * @param copyObject: the class to be backed-up
+     * @return a backup of the object, which is created by calling the given object's constructor
+     * and setting its declared class fields in the following priority:
+     * 1) if the field's class supports cloning: clone the field from the original object
+     * 2) if the field's class has a copy constructor: invoke it
+     * 3) store the original field of the given object
+     */
+    private static Object backup(Object copyObject) {
         Object backupObject = null;
         try {
-            backupObject = initCopy(copyObject);
+            backupObject = initCopy(copyObject.getClass());
             copyObjectFields(backupObject, copyObject);
         } catch (Exception e) {
             //We shouldn't get here
+            fail();
         }
         return backupObject;
     }
 
+    /**
+     * see: {@link #backup(Object)}
+     * Copies all of the class's declared fields' values
+     * @param target: target class to which the fields' values will be copied
+     * @param source: source class from which the fields' values will be copied
+     */
     private static void copyObjectFields(Object target, Object source) {
         try {
             for (Field field : source.getClass().getDeclaredFields()) {
@@ -210,9 +336,16 @@ public class OOPUnitCore {
             }
         } catch (Exception e) {
             //We shouldn't get here
+            fail();
         }
     }
 
+    /**
+     * see: {@link #backup(Object)}
+     * Copies a class's field's value in the appropriate priority, as described in the backup method
+     * @param field: the field
+     * @return a field that was copied from the given field
+     */
     private static Object fieldBackup(Object field) {
         Class<?> c = field.getClass();
 
@@ -242,6 +375,17 @@ public class OOPUnitCore {
         return field;
     }
 
+    /**
+     * Filters out and sorts the OOPTest methods in the order in which they should be invoked
+     * @param OOPTests: list of the OOPTest methods gathered from the test class
+     * @param testClass: the class on which the tests will be invoked
+     * @param tag: the tag that all the invoked OOPTest methods should have
+     * @return a sorted list of OOPTest methods, filtered by the given tag:
+     * if the given tag is an empty string "" - all OOPTest methods are qualified.
+     * test methods' order will take place only if the test class's OOPTestClass annotation is
+     * marked with the ORDERED enum instance
+     * @throws IllegalArgumentException: failure in case the class isn't OOPTestClass annotated
+     */
     private static List<Method> sortOOPTests(List<Method> OOPTests, Class<?> testClass, String tag)
             throws IllegalArgumentException {
         if(testClass == null || testClass.getDeclaredAnnotation(OOPTestClass.class) == null) {
@@ -265,6 +409,12 @@ public class OOPUnitCore {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * invokes all of class's the setup methods, with no defined order.
+     * Assumption: the setup methods do not throw exceptions
+     * @param annotatedMethods: dictionary of the OOPUnit methods, listed in the desired order
+     * @param copyObject: the class on which the setup methods will be invoked
+     */
     private static void callSetupMethods(Map<Class <? extends Annotation>, List<Method>>
                                                  annotatedMethods, Object copyObject) {
         try {
@@ -279,32 +429,46 @@ public class OOPUnitCore {
                             m.invoke(copyObject);
                         } catch (Exception e) {
                             //We shouldn't get here
+                            fail();
                         }
                     });
         } catch (Exception e) {
             //We shouldn't get here
+            fail();
         }
     }
 
+    /**
+     * initializes the copy object of the given test class with the class's 0-args constructor
+     * Assumption: the class has a 0-arguments constructor
+     * @param testClass: the class to be copied
+     * @return a new copy of the test class
+     */
     private static Object initCopy(Class<?> testClass) {
         try {
-            Class<?> c = Class.forName(testClass.getName());
-            Constructor ctor = c.getDeclaredConstructor(); //We expect a 0-arguments constructor
+            Constructor ctor = testClass.getDeclaredConstructor(); //We expect a 0-args constructor
             ctor.setAccessible(true); //Constructor might not be accessible
             return ctor.newInstance();
         } catch (Exception e) {
             //We shouldn't get here
+            fail();
         }
         return null;
     }
 
+    /**
+     * Returns the correct OOPUnit annotation for a given method.
+     * Assumption: a method will not be annotated by several OOPUnit annotations
+     * @param m: the method to be checked
+     * @return the correct OOPUnit annotation if exists, or null otherwise
+     */
     private static Annotation getOOPUnitAnnotation(Method m) {
         //List of all the currently supported OOP annotations' names in the OOPUnit framework
         List<String> OOPUnitAnnotationsList = new LinkedList<>
                 (Arrays.asList("OOPSetup", "OOPBefore", "OOPTest", "OOPAfter"));
         for (Annotation annotation : m.getDeclaredAnnotations()) {
             if(OOPUnitAnnotationsList.contains(annotation.annotationType().getName())) {
-                //Found an annotation an OOPUnit annotation for this method
+                //Found an OOPUnit annotation for this method
                 return annotation;
             }
         }
@@ -312,6 +476,14 @@ public class OOPUnitCore {
         return null;
     }
 
+    /**
+     * Returns a list that consists of relevant methods' information of the OOPUnit methods in
+     * the test class
+     * @param c: the test class from which we collect the methods' information
+     * @return a list of MethodInfo constructed as follows: the wrapper contains the method
+     * itself for each of the found methods, along with its OOPUnit annotation type, its name,
+     * and its access level
+     */
     private static List<MethodInfo> classOOPMethods(Class<?> c) {
         Stack<MethodInfo> stack = new Stack<>();
         Class<?> current = c;
@@ -340,6 +512,15 @@ public class OOPUnitCore {
         return allOOPMethods;
     }
 
+    /**
+     * Returns a dictionary that consists of a list of methods for each OOPUnit annotation type.
+     * @param c: the test class from which the OOPUnit methods are gathered from
+     * @param tag: the tag that filters out OOPTests that shouldn't be invoked
+     * @return a dictionary that consists of a list of methods for each OOPUnit annotation type.
+     * the dictionary's methods are sorted according to the order in which they should be invoked.
+     * additionally, the OOPTest methods are filtered out according to the given tag,
+     * and sorted if the test class is set to be ordered
+     */
     private static Map<Class<? extends Annotation>,List<Method>> getOOPMethods(Class<?> c,
                                                                                 String tag) {
         Map<Class<? extends Annotation>,List<Method>> methodsDict = new HashMap<>();
