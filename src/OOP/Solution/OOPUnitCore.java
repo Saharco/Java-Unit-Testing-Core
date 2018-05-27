@@ -12,18 +12,21 @@ import java.util.stream.Collectors;
 
 
 /**
- * The main OOPUnit framework class. Utilizes reflection to run tests in the desired order, and
+ * The main OOPUnit framework's class. Utilizes reflection to run tests in the desired order, and
  * gathers the results for all the class tests.
- * This class also utilizes the following OOPUnit classes:
+ * This class also utilizes the following OOPUnit classes & annotations:
  * @see OOPTestClass: annotates a test class
  * @see OOPSetup: annotates a setup method
  * @see OOPBefore: annotates a method to be called before tests
  * @see OOPAfter: annotates a method to be called after tests
  * @see OOPTest: annotates a test method
  * @see OOPExceptionRule: annotates fields from the type OOPExpectedException
- * @see OOPExpectedExceptionImpl: wraps an exception type as expected from this test
- * @see OOPResultImpl:
- * @see OOPTestSummary
+ * @see OOPExpectedExceptionImpl: wraps an exception type that's expected from this test, along
+ *      with its expected message (as invoked by {@code e.getMessage()})
+ * @see OOPResultImpl: wraps a test method's result type and an appropriate message for the test.
+ *      @see OOP.Provided.OOPResult.OOPTestResult for possible result types
+ * @see OOPTestSummary: dictionary that hold the results of all the tests.
+ *      maps each of the test class's test methods with its corresponding OOPResult
  *
  * ************************************************************************************************
  *
@@ -107,20 +110,16 @@ public class OOPUnitCore {
         //The result map of all the tests
         Map<String,OOPResult> OOPTestsResults = new HashMap<>();
 
-        //FIXME: Does not add the methods into the dictionary correctly
         //The methods map, which maps a list of OOP annotated methods to each annotation type
         Map<Class <? extends Annotation>, List<Method>> annotatedMethods =
                 getOOPMethods(testClass, tag);
 
-        //The rules list
-        List<Field> classExceptionRules = getOOPExceptionRules(testClass);
+        //The expected exception field, annotated by OOPExceptionRule
+        OOPExpectedException expectedException = getOOPExceptionField(testClass);
+//        List<Field> classExceptionRules = getOOPExceptionRules(testClass);
 
         //A copy of the given class object: initialized with the given class's 0-args constructor
         Object copyObject = initCopy(testClass);
-
-        //Sort all of the OOPTest annotated methods according to the user's given order
-        annotatedMethods.put(OOPTest.class,
-                sortOOPTests(annotatedMethods.get(OOPTest.class), testClass, tag));
 
         //Run all of the OOPSetup annotated methods, excluding overridden methods
         callSetupMethods(annotatedMethods, copyObject);
@@ -131,7 +130,7 @@ public class OOPUnitCore {
          */
 
         try {
-            callTestMethods(annotatedMethods, classExceptionRules, copyObject,
+            callTestMethods(annotatedMethods, expectedException, copyObject,
                     OOPTestsResults);
         } catch(Exception e) {
             //We shouldn't get here
@@ -141,6 +140,12 @@ public class OOPUnitCore {
         return new OOPTestSummary(OOPTestsResults);
     }
 
+    private static OOPExpectedException getOOPExceptionField(Class<?> testClass) {
+        
+    }
+
+
+    //TODO: Remove this (?)
     /**
      * Returns a list of this test class's exception rules
      * @param testClass: the test class
@@ -172,7 +177,7 @@ public class OOPUnitCore {
      *                       the test methods.
      */
     private static void callTestMethods(Map<Class<? extends Annotation>, List<Method>>
-                                      annotatedMethods, List<Field> classExceptionRules,
+                                      annotatedMethods, OOPExpectedException expectedException,
                                       Object copyObject, Map<String,OOPResult> OOPTestsResults) {
         Object backupObject = backup(copyObject);
         for(Method test : annotatedMethods.get(OOPTest.class)) {
@@ -386,25 +391,35 @@ public class OOPUnitCore {
     }
 
     /**
-     * see: {@link #backup(Object)}
      * Copies a class's field's value in the appropriate priority, as described in the backup method
-     * @param field: the field
+     * @see #backup(Object)
+     * @param field: the source field to be copied
      * @return a field that was copied from the given field
      */
     private static Object fieldBackup(Object field) {
+        if(field == null) {
+            return null;
+        }
         Class<?> c = field.getClass();
 
         //Check if the object supports cloning:
-        if(Cloneable.class.isAssignableFrom(c)) {
+        Class<?> current = field.getClass();
+        while(current != null) {
             try {
-                Method cloneMethod = c.getDeclaredMethod("clone");
+                Method cloneMethod = current.getDeclaredMethod("clone");
+                //Found a clone method
                 cloneMethod.setAccessible(true);
-                if(cloneMethod.getReturnType().equals(c) && cloneMethod.getParameterCount() == 0) {
-                    return cloneMethod.invoke(field);
-                }
-            } catch (Exception e) {
-                //The object does not support cloning
+                return cloneMethod.invoke(field); //Will fail if the field is not cloneable
+            } catch (NoSuchMethodException e) {
+                //Current class does not support cloning: keep traversing the hierarchy tree
+            } catch (InvocationTargetException e) {
+                //Can't clone the field: clone method threw CloneNotSupportedException
+                break;
+            } catch (IllegalAccessException e) {
+                //We shouldn't get here
+                fail();
             }
+            current = current.getSuperclass();
         }
 
         //Check if the object has a copy constructor:
@@ -429,7 +444,7 @@ public class OOPUnitCore {
      * if the given tag is an empty string "" - all OOPTest methods are qualified.
      * test methods' order will take place only if the test class's OOPTestClass annotation is
      * marked with the ORDERED enum instance
-     * @throws IllegalArgumentException: failure in case the class isn't OOPTestClass annotated
+     * @throws IllegalArgumentException: in case the class isn't OOPTestClass annotated
      */
     private static List<Method> sortOOPTests(List<Method> OOPTests, Class<?> testClass, String tag)
             throws IllegalArgumentException {
@@ -592,7 +607,7 @@ public class OOPUnitCore {
      * Simple record type that serves as wrapper for a given method.
      * Contains the following information:
      *  The method itself {@link MethodInfo#method},
-     *  The method's access modifier {@link MethodInfo#access},
+     *  The method's access modifier, as a string {@link MethodInfo#access},
      *  The method's name {@link MethodInfo#name},
      *  The method's OOPUnit annotation (or null if one doesn't exist) {@link MethodInfo#annotation}
      *
