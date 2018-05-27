@@ -31,19 +31,18 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
 
     @Override
     public boolean assertExpected(Exception e) {
-        Class<?> c = e.getClass();
-        if(!c.isInstance(expected)) {
+        Class<?> clazz = e.getClass();
+        if(!(e.getClass().isAssignableFrom(expected))) {
             //e is not a subclass of the expected exception
             return false;
         }
-
         String exceptionMessage = e.getMessage();
-            if(message == null || !message.contains(exceptionMessage)) {
-                //the message does not contain the given sub-message
-                return false;
-            }
-        return true;
+        if((message == null && exceptionMessage != null) || !exceptionMessage.contains(message)) {
+            //the message does not contain the given sub-message
+            return false;
         }
+        return true;
+    }
 
     public static OOPExpectedExceptionImpl none () {
         //Create a new expected exception, where the expected exception is null

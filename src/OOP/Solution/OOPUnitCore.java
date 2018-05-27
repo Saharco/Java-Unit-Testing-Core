@@ -1,6 +1,7 @@
 package OOP.Solution;
 
 import OOP.Provided.OOPAssertionFailure;
+import OOP.Provided.OOPExceptionMismatchError;
 import OOP.Provided.OOPExpectedException;
 import OOP.Provided.OOPResult;
 
@@ -13,9 +14,16 @@ import java.util.stream.Collectors;
 /**
  * The main OOPUnit framework class. Utilizes reflection to run tests in the desired order, and
  * gathers the results for all the class tests.
- *
  * This class also utilizes the following OOPUnit classes:
- * {@link }
+ * @see OOPTestClass: annotates a test class
+ * @see OOPSetup: annotates a setup method
+ * @see OOPBefore: annotates a method to be called before tests
+ * @see OOPAfter: annotates a method to be called after tests
+ * @see OOPTest: annotates a test method
+ * @see OOPExceptionRule: annotates fields from the type OOPExpectedException
+ * @see OOPExpectedExceptionImpl: wraps an exception type as expected from this test
+ * @see OOPResultImpl:
+ * @see OOPTestSummary
  *
  * ************************************************************************************************
  *
@@ -133,6 +141,12 @@ public class OOPUnitCore {
         return new OOPTestSummary(OOPTestsResults);
     }
 
+    /**
+     * Returns a list of this test class's exception rules
+     * @param testClass: the test class
+     * @return a list of every field annotated by OOPExceptionRule. Each of these fields is of type
+     * OOPExpectedException
+     */
     private static List<Field> getOOPExceptionRules(Class<?> testClass) {
         List<Field> fields = new LinkedList<>();
         Class<?> current = testClass;
@@ -174,6 +188,9 @@ public class OOPUnitCore {
                         OOPResultImpl(OOPResult.OOPTestResult.ERROR, e.getMessage()));
                 copyObjectFields(copyObject, backupObject);
                 continue;
+            } catch (Throwable throwable) {
+                //We shouldn't get here
+                fail();
             }
             //Run Tests:
             try {
@@ -181,29 +198,46 @@ public class OOPUnitCore {
                 //The test succeeded. We mark this as a success, but will override in case of failure in OOPAfter methods
                 OOPTestsResults.put(test.getName(), new OOPResultImpl(
                         OOPResult.OOPTestResult.SUCCESS, null));
-            } catch(OOPAssertionFailure e) {
-                OOPResult testResult = new OOPResultImpl(OOPResult.OOPTestResult.FAILURE,
-                        e.getMessage());
-                OOPTestsResults.put(test.getName(), testResult);
-                copyObjectFields(copyObject, backupObject);
+            } catch(InvocationTargetException e) {
+                try {
+                    //Method threw an exception: decipher which exception it was
+                    throw e.getCause();
+                } catch(OOPAssertionFailure exception) {
+                    OOPResult testResult = new OOPResultImpl(OOPResult.OOPTestResult.FAILURE,
+                            e.getMessage());
+                    OOPTestsResults.put(test.getName(), testResult);
+                    copyObjectFields(copyObject, backupObject);
+                } catch(Exception exception) {
+                    if (classExceptionRules.contains(OOPExpectedException.none())) {
+                        //Unexpected exception occurred: Error!
+                        OOPTestsResults.put(test.getName(), new
+                                OOPResultImpl(OOPResult.OOPTestResult.ERROR, exception.getClass().getName()));
+                        copyObjectFields(copyObject, backupObject);
+                    } else if (expectedException(classExceptionRules, exception, copyObject)) {
+                        //Expected exception: Success!
+                        OOPTestsResults.put(test.getName(), new OOPResultImpl(
+                                OOPResult.OOPTestResult.SUCCESS, null));
+                    } else {
+                        //Expected exception mismatch!
+                        try {
+                            OOPTestsResults.put(test.getName(), new
+                                    OOPResultImpl(OOPResult.OOPTestResult.EXPECTED_EXCEPTION_MISMATCH, new
+                                    OOPExceptionMismatchError(((OOPExpectedException)
+                                    classExceptionRules.get(0).get(copyObject)).getExpectedException(),
+                                    exception.getClass()).getMessage()));
+                        } catch (Exception e1) {
+                            //We shouldn't get here
+                            fail();
+                        }
+                        copyObjectFields(copyObject, backupObject);
+                    }
+                } catch (Throwable throwable) {
+                    //We shouldn't get here
+                    fail();
+                }
             } catch(Exception e) {
-                if(classExceptionRules.contains(OOPExpectedExceptionImpl.none())) {
-                    //Unexpected exception occurred: Error!
-                    OOPTestsResults.put(test.getName(), new
-                            OOPResultImpl(OOPResult.OOPTestResult.ERROR, e.getMessage()));
-                    copyObjectFields(copyObject, backupObject);
-                } else if(expectedException(classExceptionRules, e, copyObject)) {
-                    //Expected exception: Success!
-                    OOPTestsResults.put(test.getName(), new OOPResultImpl(
-                            OOPResult.OOPTestResult.SUCCESS, null));
-                }
-                else {
-                    //Expected exception mismatch!
-                    OOPTestsResults.put(test.getName(),new
-                            OOPResultImpl(OOPResult.OOPTestResult.EXPECTED_EXCEPTION_MISMATCH,
-                            e.getMessage()));
-                    copyObjectFields(copyObject, backupObject);
-                }
+                //We shouldn't get here
+                fail();
             }
             //Run OOPAfter methods:
             try {
@@ -216,6 +250,9 @@ public class OOPUnitCore {
                 OOPTestsResults.put(test.getName(), new OOPResultImpl(OOPResult.OOPTestResult.ERROR,
                         e.getClass().getName())); //This will override the result
                 copyObjectFields(copyObject, backupObject);
+            } catch (Throwable throwable) {
+                //We shouldn't get here
+                fail();
             }
         }
     }
@@ -232,6 +269,7 @@ public class OOPUnitCore {
         try {
             for(Field rule : classExceptionRules) {
                 if(((OOPExpectedException)rule.get(copyObject)).assertExpected(exception)) {
+                    //We expect this exception's type and message
                     return true;
                 }
             }
@@ -255,7 +293,7 @@ public class OOPUnitCore {
     private static void callBeforeAfter(Map<Class<? extends Annotation>, List<Method>>
                                         annotatedMethods, Object copyObject,
                                         Class<? extends Annotation> annotation,
-                                        Method test) throws Exception {
+                                        Method test) throws Throwable {
         assert(annotation == OOPBefore.class || annotation == OOPAfter.class);
         Method[] methods = new Method[annotatedMethods.get(annotation).size()];
         methods = annotatedMethods.get(annotation).toArray(methods);
@@ -269,7 +307,14 @@ public class OOPUnitCore {
                 .collect(Collectors.toList());
         for(Method m : suitableMethods) {
 //            backupObject = backup(copyObject); TODO: check if backup is performed here
-            m.invoke(copyObject);
+            try {
+                m.invoke(copyObject);
+            } catch (InvocationTargetException e) {
+                throw e.getCause();
+            } catch (IllegalAccessException e) {
+                //We shouldn't get here
+                fail();
+            }
         }
     }
 
@@ -467,7 +512,7 @@ public class OOPUnitCore {
         List<String> OOPUnitAnnotationsList = new LinkedList<>
                 (Arrays.asList("OOPSetup", "OOPBefore", "OOPTest", "OOPAfter"));
         for (Annotation annotation : m.getDeclaredAnnotations()) {
-            if(OOPUnitAnnotationsList.contains(annotation.annotationType().getName())) {
+            if(OOPUnitAnnotationsList.contains(annotation.annotationType().getSimpleName())) {
                 //Found an OOPUnit annotation for this method
                 return annotation;
             }
