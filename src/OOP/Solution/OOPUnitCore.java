@@ -45,36 +45,47 @@ import java.util.stream.Collectors;
  *
  *  Information gathering functions:
  *
- *  {@link #getOOPUnitAnnotation(Method)}
- *  {@link #getOOPExceptionRules(Class)}
- *  {@link #classOOPMethods(Class)}
- *  {@link #sortOOPTests(List, Class, String)}
- *  {@link #initCopy(Class)}  //TODO: check if this is OK
- *  {@link #expectedException(List, Exception, Object)}
- *  {@link #containsTest(Method, Class, Method)}
+ *  {@link #getOOPUnitAnnotation(Method)}: Gets the appropriate OOPUnit annotatinon of a mehod,
+ *  or null if it isn't annotated by any
+ *  {@link #getExpectedException(Field, Object)}: Gets the field's value,
+ *  of type OOPExpectedException
+ *  {@link #getOOPExceptionField(Class)}: Gets the class's OOPExceptionRule annotated field, which
+ *  is assumed to be an OOPExpectedException. If there is no rule, null is returned
+ *  {@link #classOOPMethods(Class)}: Gets all of the class's OOP annotated methods
+ *  {@link #initCopy(Class)}: Creates a copy of the given class, assuming the class has a
+ *  0 arguments constructor
+ *  {@link #containsTest(Method, Class, Method)}: Checks if a given method's OOP annotation's value
+ *  (assumed to be annotated by either OOPBefore or OOPAfter) includes a given test method
  *
  *  ***********************************************************************************************
  *
  *  Methods invoking functions:
  *
- *  Invokes the OOPSetup methods: {@link #callSetupMethods(Map, Object)}
- *  Invokes all OOPTest methods: {@link #callTestMethods(Map, Field, Object, Map)}
- *  Invokes a given OOPTest method's corresponding OOPBefore or OOPAfter methods:
- *      {@link #callBeforeAfter(Map, Object, Class, Method)}
+ *  {@link #callSetupMethods(Map, Object)}: Invokes the OOPSetup methods
+ *  {@link #callTestMethods(Map, Field, Object, Map)}: Invokes all OOPTest methods
+ *  {@link #callBeforeAfter(Map, Object, Class, Method)}: Invokes a given OOPTest method's
+ *  corresponding OOPBefore or OOPAfter methods:
  *
  *  ***********************************************************************************************
  *
  *  Backup related functions:
  *
- *  {@link #backup(Object)}
- *  {@link #fieldBackup(Object)}
- *  {@link #copyObjectFields(Object, Object)}
+ *  {@link #backup(Object)}: Backs up a given object's field in a separate back-up object
+ *  {@link #fieldBackup(Object)}: Backs up a single object's field
+ *  {@link #copyObjectFields(Object, Object)}: Copies a source object's fields into a target object
  *
  *  ***********************************************************************************************
  *
  *  Misc functions:
  *
- *  {@link #reverseArray(Object[])}
+ *  {@link #reverseArray(Object[])}: Reverses an array
+ *  {@link #resetExpectedException(Field, Object)}: Resets the test class's rule to none
+ *  {@link #sortOOPTests(List, Class, String)}: Filters & sorts the test methods accordingly
+ *
+ *  **************************** Helper classes to support this class: ****************************
+ *
+ *  {@link MethodInfo}: Wraps a method's relevant information, helps in comparing methods.
+ *  Please visit this helper class's documentation for more information
  *
  *  ***********************************************************************************************
  *
@@ -139,47 +150,6 @@ public class OOPUnitCore {
         return new OOPTestSummary(OOPTestsResults);
     }
 
-    private static Field getOOPExceptionField(Class<?> testClass) {
-        Class<?> current = testClass;
-        while(current != null) {
-            for(Field field : current.getDeclaredFields()) {
-                if(field.getAnnotation(OOPExceptionRule.class) != null) {
-                    field.setAccessible(true);
-                    if (field.getClass().isAssignableFrom(OOPExpectedException.class)) {
-                        //Assumption: OOPExceptionRule only annotates OOPExpectedException fields
-                        fail();
-                    }
-                    return field;
-                }
-            }
-            current = current.getSuperclass();
-        }
-        return null;
-    }
-
-
-    //TODO: Delete this (?)
-    /**
-     * Returns a list of this test class's exception rules
-     * @param testClass: the test class
-     * @return a list of every field annotated by OOPExceptionRule. Each of these fields is of type
-     * OOPExpectedException
-     */
-    private static List<Field> getOOPExceptionRules(Class<?> testClass) {
-        List<Field> fields = new LinkedList<>();
-        Class<?> current = testClass;
-        while(current.getSuperclass() != null) {
-            for(Field field : current.getDeclaredFields()) {
-                if(field.getAnnotation(OOPExceptionRule.class) != null) {
-                    field.setAccessible(true);
-                    fields.add(field);
-                }
-            }
-            current = current.getSuperclass();
-        }
-        return fields;
-    }
-
     /**
      * Main framework method: runs all the tests in the test class, and gathers the results
      * @param annotatedMethods: dictionary that consists of a list of OOPUnit annotated methods,
@@ -192,10 +162,11 @@ public class OOPUnitCore {
     private static void callTestMethods(Map<Class<? extends Annotation>, List<Method>>
                                       annotatedMethods, Field expectedException,
                                       Object copyObject, Map<String,OOPResult> OOPTestsResults) {
-        Object backupObject = backup(copyObject);
         for(Method test : annotatedMethods.get(OOPTest.class)) {
             //Run OOPBefore methods:
+            Object backupObject = backup(copyObject);
             try {
+                backupObject = backup(copyObject);
                 callBeforeAfter(annotatedMethods, copyObject, OOPBefore.class, test);
             } catch (Exception e) {
                /*
@@ -215,14 +186,27 @@ public class OOPUnitCore {
             resetExpectedException(expectedException, copyObject);
             OOPExpectedException rule = OOPExpectedException.none();
             try {
+                backupObject = backup(copyObject);
                 test.invoke(copyObject); //Might also change the expected exception
-                //The test succeeded. We mark this as a success,
+                /*
+                 * The test finished without throwing an exception.
+                 * We will mark this as a success, as long as no exception was expected.
+                 * In the case of an expected exception: the result will be an Error
+                 */
+                rule = getExpectedException(expectedException, copyObject);
+                if(rule.getExpectedException() != null) {
+                    OOPTestsResults.put(test.getName(), new OOPResultImpl(
+                            OOPResult.OOPTestResult.ERROR, rule.getExpectedException().getName()));
+                    copyObjectFields(copyObject, backupObject);
+                }
                 // but will override in case of failure in OOPAfter methods
-                OOPTestsResults.put(test.getName(), new OOPResultImpl(
-                        OOPResult.OOPTestResult.SUCCESS, null));
+                else {
+                    OOPTestsResults.put(test.getName(), new OOPResultImpl(
+                            OOPResult.OOPTestResult.SUCCESS, null));
+                }
             } catch(InvocationTargetException e) {
                 try {
-                    //Method threw an exception: decipher which exception it was!
+                    //Method threw an exception: we decipher which exception it was!
                     //We throw the exception that's wrapped inside e forward, and catch it outside
                     throw e.getCause();
 
@@ -268,6 +252,7 @@ public class OOPUnitCore {
             }
             //Run OOPAfter methods:
             try {
+                backupObject = backup(copyObject);
                 callBeforeAfter(annotatedMethods, copyObject, OOPAfter.class, test);
             } catch (Exception e) {
                 /*
@@ -284,6 +269,36 @@ public class OOPUnitCore {
         }
     }
 
+    /**
+     * Gets the OOPExceptionRule annotated OOPExpectedException field in the class
+     * @param testClass: the test class in which we find the field
+     * @return the class's OOPExpectedException field if exists, or null otherwise
+     */
+    private static Field getOOPExceptionField(Class<?> testClass) {
+        Class<?> current = testClass;
+        while(current != null) {
+            for(Field field : current.getDeclaredFields()) {
+                if(field.getAnnotation(OOPExceptionRule.class) != null) {
+                    field.setAccessible(true);
+                    if (field.getClass().isAssignableFrom(OOPExpectedException.class)) {
+                        //Assumption: OOPExceptionRule only annotates OOPExpectedException fields
+                        fail();
+                    }
+                    return field;
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return null;
+    }
+
+    /**
+     * Assumes that the given field contains information of type OOPExpectedExecption,
+     * and returns its value
+     * @param expectedException: the field
+     * @param copyObject: class on which we find this field's value
+     * @return the field's value: an OOPExpectedException rule of the test class
+     */
     private static OOPExpectedException getExpectedException(Field expectedException,
                                                              Object copyObject) {
         OOPExpectedException expectEmpty = OOPExpectedException.none();
@@ -311,30 +326,6 @@ public class OOPUnitCore {
         }
     }
 
-
-    /**
-     * Checks if a given exception was declared in a given test class's exception rules
-     * @param classExceptionRules: the class's exception rules
-     * @param exception: a candidate exception to be checked
-     * @param copyObject: the test class
-     * @return true iff the given exception is part of the class's exception rules
-     */
-    private static boolean expectedException(List<Field> classExceptionRules, Exception exception,
-                                             Object copyObject) {
-        try {
-            for(Field rule : classExceptionRules) {
-                if(((OOPExpectedException)rule.get(copyObject)).assertExpected(exception)) {
-                    //We expect this exception's type and message
-                    return true;
-                }
-            }
-        } catch(Exception e) {
-            //We shouldn't get here
-            fail();
-        }
-        return false;
-    }
-
     /**
      * Runs either OOPBefore or OOPAfter annotated methods, and throws potential exceptions
      * from running these methods onwards in case they fail
@@ -352,16 +343,15 @@ public class OOPUnitCore {
         assert(annotation == OOPBefore.class || annotation == OOPAfter.class);
         Method[] methods = new Method[annotatedMethods.get(annotation).size()];
         methods = annotatedMethods.get(annotation).toArray(methods);
-        if(annotation == OOPAfter.class) { //TODO: Check if this is OK
+        if(annotation == OOPAfter.class) {
             reverseArray(methods);
         }
-        Class<?> testClass = test.getDeclaringClass();
+//        Class<?> testClass = test.getDeclaringClass(); //TODO: Check if this is needed (for predicate)
         List<Method> suitableMethods = Arrays.stream(methods)
-                .filter(m -> (containsTest(m, annotation, test)) &&
-                        (m.getDeclaringClass().isAssignableFrom(testClass))) //TODO: Check if this is OK
+//                && (m.getDeclaringClass().isAssignableFrom(testClass) //TODO: Check if this needs to be added to the predicate
+                .filter(m -> (containsTest(m, annotation, test)))
                 .collect(Collectors.toList());
         for(Method m : suitableMethods) {
-//            backupObject = backup(copyObject); TODO: check if backup is performed here
             try {
                 m.invoke(copyObject);
             } catch (InvocationTargetException e) {
@@ -423,8 +413,8 @@ public class OOPUnitCore {
     }
 
     /**
-     * see: {@link #backup(Object)}
      * Copies all of the class's declared fields' values
+     * @see #backup(Object)
      * @param target: target class to which the fields' values will be copied
      * @param source: source class from which the fields' values will be copied
      */
@@ -504,16 +494,21 @@ public class OOPUnitCore {
         }
 
         assert(testClass.getDeclaredAnnotation(OOPTestClass.class) != null);
+
+        //Filter out the methods that aren't tagged with the desired tag
+        Method[] currentTestMethods = new Method[OOPTests.size()];
+        List<Method> tagsFiltered =  Arrays.stream(OOPTests.toArray(currentTestMethods))
+                .filter(m->m.getDeclaredAnnotation(OOPTest.class).tag().equals(tag) ||
+                        (tag.equals(defaultTag)))
+                .collect(Collectors.toList());
         if(testClass.getDeclaredAnnotation(OOPTestClass.class).value() ==
                 OOPTestClass.OOPTestClassType.UNORDERED) {
-            //No order is required for the test methods
-            return OOPTests;
+            //No order is required for the test methods: do not sort methods
+            return tagsFiltered;
         }
-
-        Method[] currentTestMethods = new Method[OOPTests.size()];
-        return Arrays.stream(OOPTests.toArray(currentTestMethods))
-                .filter(m->m.getDeclaredAnnotation(OOPTest.class).tag().equals(tag) ||
-                        (!tag.equals(defaultTag)))
+        //Test class is ORDERED: sort the methods according to their OOPTest annotations' order
+        currentTestMethods = new Method[tagsFiltered.size()];
+        return Arrays.stream(tagsFiltered.toArray(currentTestMethods))
                 .sorted(Comparator.comparingInt(m ->
                         m.getDeclaredAnnotation(OOPTest.class).order()))
                 .collect(Collectors.toList());
@@ -679,19 +674,19 @@ public class OOPUnitCore {
             this.annotation = annotation;
         }
 
-        public Method getMethod() {
+        private Method getMethod() {
             return method;
         }
 
-        public String getAccess() {
+        private String getAccess() {
             return access;
         }
 
-        public String getName() {
+        private String getName() {
             return name;
         }
 
-        public Annotation getAnnotation() {
+        private Annotation getAnnotation() {
             return annotation;
         }
 
