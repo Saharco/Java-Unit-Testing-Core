@@ -4,7 +4,10 @@ import OOP.Provided.OOPResult;
 
 public class OOPResultImpl implements OOPResult {
 
+    //Attribute: a test method's result
     private OOPTestResult result;
+
+    //Attribute: a test method's name
     private String message;
 
     OOPResultImpl(OOPTestResult result, String message) {
@@ -31,14 +34,11 @@ public class OOPResultImpl implements OOPResult {
             return false;
         }
         OOPResultImpl compareTo = (OOPResultImpl) obj;
-        if(compareTo.message.equals(message) && compareTo.result.equals(result)) {
-            return true;
-        }
-        return false;
+        return compareTo.message.equals(message) && compareTo.result.equals(result);
     }
 
     @Override
     public int hashCode() {
-       return message.hashCode() * 4 + result.ordinal(); //TODO: check if this is OK
+       return message.hashCode() * 4 + result.ordinal();
     }
 }

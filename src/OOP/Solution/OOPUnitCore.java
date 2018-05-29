@@ -129,6 +129,7 @@ public class OOPUnitCore {
         Object copyObject = initCopy(testClass);
 
         //The class's expected exception field annotated by OOPExceptionRule (null if doesn't exist)
+        assert copyObject != null;
         Field expectedException = getOOPExceptionField(copyObject);
 
         //Run all of the OOPSetup annotated methods, excluding overridden methods
@@ -144,10 +145,14 @@ public class OOPUnitCore {
                     OOPTestsResults);
         } catch(Exception e) {
             //We shouldn't get here
-            fail();
+            error();
         }
 
         return new OOPTestSummary(OOPTestsResults);
+    }
+
+    private static void error() throws IllegalArgumentException {
+        throw new IllegalArgumentException();
     }
 
     /**
@@ -162,14 +167,13 @@ public class OOPUnitCore {
     private static void callTestMethods(Map<Class<? extends Annotation>, List<Method>>
                                       annotatedMethods, Field expectedException,
                                       Object copyObject, Map<String,OOPResult> OOPTestsResults) {
-//        Object expectedExceptionClass = getExceptedExceptionDeclaredClass(expectedException, copyObject);
         for(Method test : annotatedMethods.get(OOPTest.class)) {
             //Run OOPBefore methods:
             Object backupObject = null;
             try {
                 backupObject = backup(copyObject);
                 callBeforeAfter(annotatedMethods, copyObject, OOPBefore.class, test);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                /*
                 * The test has failed: couldn't run OOPBefore methods.
                 * Mark the test's failure, restore the object, and continue to the next test
@@ -178,10 +182,6 @@ public class OOPUnitCore {
                         OOPResultImpl(OOPResult.OOPTestResult.ERROR, e.getMessage()));
                 copyObjectFields(copyObject, backupObject);
                 continue;
-            } catch (Throwable throwable) {
-                //We shouldn't get here
-                System.out.println("PROBLEM! Info: " +throwable.toString());
-//                fail();
             }
             //Run Tests:
             //We reset the expected exception before each test
@@ -192,14 +192,14 @@ public class OOPUnitCore {
                 /*
                  * The test finished without throwing an exception.
                  * We will mark this as a success, as long as no exception was expected.
-                 * In the case of an expected exception: the result will be an Error
+                 * In the case of an expected exception (not thrown): the result will be an Error.
+                 * The result will be overridden in case of failure in OOPAfter methods
                  */
                 rule = getOOPExpectedException(expectedException, copyObject);
-                if(rule.getExpectedException() != null) {
+                if(rule!= null && rule.getExpectedException() != null) {
                     OOPTestsResults.put(test.getName(), new OOPResultImpl(
                             OOPResult.OOPTestResult.ERROR, rule.getExpectedException().getName()));
                 }
-                // but will override in case of failure in OOPAfter methods
                 else {
                     OOPTestsResults.put(test.getName(), new OOPResultImpl(
                             OOPResult.OOPTestResult.SUCCESS, null));
@@ -216,7 +216,7 @@ public class OOPUnitCore {
                     OOPTestsResults.put(test.getName(), testResult);
                 } catch(Exception exception) {
                     rule = getOOPExpectedException(expectedException, copyObject);
-                    if (rule.getExpectedException() == null) {
+                    if (rule == null || rule.getExpectedException() == null) {
                         //Unexpected exception occurred: Error!
 
                         OOPTestsResults.put(test.getName(), new OOPResultImpl(
@@ -236,23 +236,23 @@ public class OOPUnitCore {
                                     exception.getClass()).getMessage()));
                         } catch (Exception exe) {
                             //We shouldn't get here
-                            fail();
+                            error();
                         }
                         copyObjectFields(copyObject, backupObject);
                     }
                 } catch (Throwable throwable) {
                     //We shouldn't get here
-                    fail();
+                    error();
                 }
             } catch(Exception e) {
                 //We shouldn't get here
-                fail();
+                error();
             }
             //Run OOPAfter methods:
             try {
                 backupObject = backup(copyObject);
                 callBeforeAfter(annotatedMethods, copyObject, OOPAfter.class, test);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 /*
                  * The test has failed: couldn't run OOPAfter methods.
                  * Mark the test's failure, restore the object, and continue to the next test
@@ -261,14 +261,10 @@ public class OOPUnitCore {
                         e.getClass().getName())); //This will override the result
                 copyObjectFields(copyObject, backupObject);
                 //Continues to the next test
-            } catch (Throwable throwable) {
-                //We shouldn't get here
-                System.out.println("PROBLEM! Info: " +throwable.toString());
-//                fail();
             }
         }
     }
-    
+
     /**
      * Gets the OOPExceptionRule annotated OOPExpectedException field in the class
      * @param copyObject: the test class in which we find the field
@@ -288,7 +284,7 @@ public class OOPUnitCore {
                         result = field;
                     } catch (Exception e) {
                         //We shouldn't get here
-                        fail();
+                        error();
                     }
                 }
             }
@@ -311,7 +307,7 @@ public class OOPUnitCore {
             (OOPExpectedException) expectedException.get(copyObject));
         } catch (IllegalAccessException e) {
             //We shouldn't get here
-            fail();
+            error();
         }
         //We shouldn't get here
         return null;
@@ -330,7 +326,7 @@ public class OOPUnitCore {
             expectedException.set(copyObject, OOPExpectedException.none());
         } catch (IllegalAccessException e) {
             //We shouldn't get here
-            fail();
+            error();
         }
     }
 
@@ -368,7 +364,7 @@ public class OOPUnitCore {
                 throw e.getCause();
             } catch (IllegalAccessException e) {
                 //We shouldn't get here
-                fail();
+                error();
             }
         }
     }
@@ -420,7 +416,7 @@ public class OOPUnitCore {
             copyObjectFields(backupObject, copyObject);
         } catch (Exception e) {
             //We shouldn't get here
-            fail();
+            error();
         }
         return backupObject;
     }
@@ -439,7 +435,7 @@ public class OOPUnitCore {
             }
         } catch (Exception e) {
             //We shouldn't get here
-            fail();
+            error();
         }
     }
 
@@ -470,7 +466,7 @@ public class OOPUnitCore {
                 break;
             } catch (IllegalAccessException e) {
                 //We shouldn't get here
-                fail();
+                error();
             }
             current = current.getSuperclass();
         }
@@ -547,12 +543,12 @@ public class OOPUnitCore {
                             m.invoke(copyObject);
                         } catch (Exception e) {
                             //We shouldn't get here
-                            fail();
+                            error();
                         }
                     });
         } catch (Exception e) {
             //We shouldn't get here
-            fail();
+            error();
         }
     }
 
@@ -569,7 +565,7 @@ public class OOPUnitCore {
             return ctor.newInstance();
         } catch (Exception e) {
             //We shouldn't get here
-            fail();
+            error();
         }
         return null;
     }
@@ -687,7 +683,7 @@ public class OOPUnitCore {
             this.annotation = annotation;
         }
 
-        private Method getMethod() {
+        /*private Method getMethod() {
             return method;
         }
 
@@ -698,6 +694,8 @@ public class OOPUnitCore {
         private String getName() {
             return name;
         }
+        * These methods will never be used - we keep those here for good practice
+        */
 
         private Annotation getAnnotation() {
             return annotation;

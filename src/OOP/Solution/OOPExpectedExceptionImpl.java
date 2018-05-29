@@ -34,12 +34,15 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
         if(!(expected.isAssignableFrom(e.getClass()))) {
             return false;
         }
+        //The given exception is of the expected type. Check its message:
         String exceptionMessage = e.getMessage();
         if(exceptionMessage == null) {
+            //The given exception has no messages: we return true iff we expect 0 sub-messages
             return messages.isEmpty();
         }
         for(String message : messages) {
             if(!exceptionMessage.contains(message)) {
+                //One of the expected sub-messages is not contained in the given exception's message
                 return false;
             }
         }
