@@ -10,7 +10,7 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
     //Attribute: the expected exception class
     private Class<? extends Exception> expected;
     //Attribute: message string that we expect in the exception's message
-    private String message;
+    private List<String> messages;
 
     @Override
     public Class<? extends Exception> getExpectedException() {
@@ -25,22 +25,23 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
 
     @Override
     public OOPExpectedException expectMessage(String msg) {
-        message = msg;
+        messages.add(msg);
         return this;
     }
 
     @Override
     public boolean assertExpected(Exception e) {
-        Class<?> clazz = e.getClass();
-        if(!(e.getClass()).isAssignableFrom(expected)) {
-//        if(!(expected.isAssignableFrom(e.getClass()))) { //TODO: Check if this is reversed
-            //e is not a subclass of the expected exception
+        if(!(expected.isAssignableFrom(e.getClass()))) {
             return false;
         }
         String exceptionMessage = e.getMessage();
-        if((message == null && exceptionMessage != null) || !exceptionMessage.contains(message)) {
-            //the message does not contain the given sub-message
-            return false;
+        if(exceptionMessage == null) {
+            return messages.isEmpty();
+        }
+        for(String message : messages) {
+            if(!exceptionMessage.contains(message)) {
+                return false;
+            }
         }
         return true;
     }
@@ -49,7 +50,7 @@ public class OOPExpectedExceptionImpl implements OOPExpectedException {
         //Create a new expected exception, where the expected exception is null
         OOPExpectedExceptionImpl res = new OOPExpectedExceptionImpl();
         res.expected = null;
-        res.message = null;
+        res.messages = new LinkedList<>();
         return res;
     }
 }

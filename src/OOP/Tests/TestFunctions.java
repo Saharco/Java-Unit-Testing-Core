@@ -6,9 +6,7 @@ import OOP.Solution.OOPUnitCore;
 
 import static OOP.Solution.OOPUnitCore.assertEquals;
 
-/**
- * Created by elran on 08/01/17.
- */
+
 public class TestFunctions {
 	public static class WrapperCloneable implements Cloneable{
 		Integer a;
@@ -121,7 +119,7 @@ public class TestFunctions {
 	{
 		System.out.println(String.format("\u001B[31mTest failed in file: %s, line: %d, msg: %s\u001B[0m",new Throwable().getStackTrace()[2].getFileName(),new Throwable().getStackTrace()[2].getLineNumber(),msg));
 	}
-	public static void launchTest(Class<?> aClass,int successNum,int failNum,int errorNum)
+	public static void launchTest(Class<?> aClass,int successNum,int failNum,int errorNum, int mismatchNum)
 	{
 		System.out.println("Launching test on class: "+aClass.getName());
 		OOPTestSummary result = OOPUnitCore.runClass(aClass);
@@ -129,7 +127,8 @@ public class TestFunctions {
 		successCount+=shouldPass(successNum,result.getNumSuccesses());
 		successCount+=shouldPass(failNum,result.getNumFailures());
 		successCount+=shouldPass(errorNum,result.getNumErrors());
-		if(successCount == 3)
+        successCount+=shouldPass(mismatchNum,result.getNumExceptionMismatches());
+		if(successCount == 4)
 		{
 			System.out.println("\u001B[32mTest numbers matched on class: "+aClass.getName()+"\u001B[0m");
 		}

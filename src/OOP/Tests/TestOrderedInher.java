@@ -1,9 +1,7 @@
 package OOP.Tests;
 
-import OOP.Solution.OOPAfter;
-import OOP.Solution.OOPBefore;
-import OOP.Solution.OOPTest;
-import OOP.Solution.OOPTestClass;
+import OOP.Provided.OOPExpectedException;
+import OOP.Solution.*;
 
 import static OOP.Tests.TestFunctions.*;
 /**
@@ -12,6 +10,22 @@ import static OOP.Tests.TestFunctions.*;
 @OOPTestClass(OOPTestClass.OOPTestClassType.ORDERED)
 public class TestOrderedInher extends TestOrdered {
 
+    @OOPExceptionRule
+    private OOPExpectedException expected = OOPExpectedExceptionImpl.none();
+
+    @OOPBefore({"test10"})
+    public void beforeTest10_1()
+    {
+        expected.expect(ExceptionDummy.class);
+    }
+
+    @OOPBefore({"test12"})
+    public void beforeTest12_1()
+    {
+        expected = OOPExpectedExceptionImpl.none();
+    }
+
+	//SUCCESS
 	@Override
 	@OOPTest(order = 16)
 	protected void test16() //we override
@@ -19,6 +33,7 @@ public class TestOrderedInher extends TestOrdered {
 		c=2;
 	}
 
+	//SUCCESS
 	@OOPTest(order = 18)
 	private void test18()
 	{
@@ -30,6 +45,7 @@ public class TestOrderedInher extends TestOrdered {
 		shouldPass(1,d);
 		d++;
 	}
+	//SUCCESS
 	@OOPTest(order = 17)
 	public void test17()
 	{
